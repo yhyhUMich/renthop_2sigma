@@ -1,0 +1,17 @@
+library(jsonlite)
+t1 <- fromJSON("C://Users//yuan//Desktop//train.json")
+
+t2 <- data.frame(bathrooms=unlist(t1$bathrooms)
+                 ,bedrooms=unlist(t1$bedrooms)
+                 ,building_id=as.factor(unlist(t1$building_id))
+                 ,created=as.POSIXct(unlist(t1$created))
+                 ,n_photos = as.numeric(sapply(t1$photos, length))
+                 ,n_description = as.numeric(sapply(t1$description, nchar))
+                 ,latitude=unlist(t1$latitude)
+                 ,longitude=unlist(t1$longitude)
+                 ,listing_id=unlist(t1$listing_id)
+                 ,manager_id=as.factor(unlist(t1$manager_id))
+                 ,price=unlist(t1$price)
+                 ,interest_level=as.factor(unlist(t1$interest_level))
+
+)
