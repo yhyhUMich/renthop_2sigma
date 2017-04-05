@@ -1,3 +1,14 @@
 // Place your settings in this file to overwrite default and user settings.
 {
+    "editor.fontSize": 14,
+    "editor.wordWrap": "on",
+    "window.zoomLevel": 0,
+    
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 1000,
+
+    "python.linting.enabled": true,
+    "python.linting.lintOnSave": true,
+    "python.linting.pep8Enabled": true,
+    "python.linting.pylintEnabled": false
 }
