@@ -16,6 +16,7 @@ random.seed(321)
 np.random.seed(321)
 
 # read file
+X_train_test = pd.read_json("./train.json")
 X_train = pd.read_json("./train.json")
 X_test = pd.read_json("./test.json")
 
@@ -24,14 +25,35 @@ interest_level_map = {'low': 0, 'medium': 1, 'high': 2}
 X_train.interest_level = X_train.interest_level.apply(lambda x: interest_level_map[x])
 X_test["interest_level"] = -1
 
-# add features
+# add features varible
 # normailize all the features tokens
-X_train.features = X_train.features.apply(lambda x: " ".join(["_".join(i.lower().split(" ")) for i in x]))
-X_test.features = X_test.features.apply(lambda x: " ".join(["_".join(i.lower().split(" ")) for i in x]))
+def normal_features(x):
+    fea_list=[]
+    for fea in x:
+        if("*" in fea):
+            tmp = fea.split("*")
+            for t in range(tmp.count("")):
+                tmp.remove("")
+            for i in tmp:
+                i = i.strip()
+                i = "_".join(i.lower().split(" "))
+                fea_list.append(i)
+        else:
+            tmp = fea.split("*")
+            for t in range(tmp.count("")):
+                tmp.remove("")
+            fea = "_".join(fea.lower().split(" "))
+            fea_list.append(fea)
+    
+    return " ".join(fea_list)
+
+X_train.features = X_train.features.apply(normal_features)
+X_test.features = X_test.features.apply(normal_features)
 
 feature_transform = CountVectorizer(stop_words='english', max_features=150)
 feature_transform.fit(list(X_train.features) + list(X_test.features))
 
+#counting size
 train_size = len(X_train)
 low_count = len(X_train[X_train.interest_level == 0])
 medium_count = len(X_train[X_train.interest_level == 1])
@@ -39,34 +61,42 @@ high_count = len(X_train[X_train.interest_level == 2])
 
 
 def find_objects_with_only_one_record(feature_name):
-    # why the manager/building/address only gives one list matters
-    temp = pd.concat([X_train[feature_name].reset_index(),
-                      X_test[feature_name].reset_index()])
+    # converting building_ids and manger_ids with only 1 observation into a separate group
+    
+    temp = pd.concat([X_train[feature_name].reset_index(), X_test[feature_name].reset_index()])
     temp = temp.groupby(feature_name, as_index=False).count()
     return temp[temp['index'] == 1]
 
 managers_with_one_lot = find_objects_with_only_one_record('manager_id')
 buildings_with_one_lot = find_objects_with_only_one_record('building_id')
 addresses_with_one_lot = find_objects_with_only_one_record('display_address')
+#both display and street address is also a high cardinarl categorical varible
+#why not use one lot treatment? still questioning about address using
 
 # form my features matrix
-
-
 def transform_data(X):
-    # add features
+     
+    # add the sparse matrix of features into X
     feat_sparse = feature_transform.transform(X["features"])
     vocabulary = feature_transform.vocabulary_
     del X['features']
-
+    
     X1 = pd.DataFrame([pd.Series(feat_sparse[i].toarray().ravel()) for i in np.arange(feat_sparse.shape[0])])
     X1.columns = list(sorted(vocabulary.keys()))
     X = pd.concat([X.reset_index(), X1.reset_index()], axis=1)
+    #maybe no need of the original listing index
     del X['index']
-
+    
+    #transformed other features
     X["num_photos"] = X["photos"].apply(len)
     X['created'] = pd.to_datetime(X["created"])
     X["num_description_words"] = X["description"].apply(lambda x: len(x.split(" ")))
+   
+    #computing price per room, if room=0, set room = 1
+    X.loc[X.loc[:,"bedrooms"] == 0, "bedrooms"] = 1
     X['price_per_bed'] = X['price'] / X['bedrooms']
+    #considering not include price/bathrooms, since most of the bathroom is 1
+    X.loc[X.loc[:,"bathrooms"] == 0, "bathrooms"] = 1
     X['price_per_bath'] = X['price'] / X['bathrooms']
     X['price_per_room'] = X['price'] / (X['bathrooms'] + X['bedrooms'])
 
@@ -79,7 +109,8 @@ def transform_data(X):
 
     X['display_address'] = X['display_address'].apply(lambda x: x.lower().strip())
     X['street_address'] = X['street_address'].apply(lambda x: x.lower().strip())
-
+    #coondiser no street_address   
+    
     X['pred0_low'] = low_count * 1.0 / train_size
     X['pred0_medium'] = medium_count * 1.0 / train_size
     X['pred0_high'] = high_count * 1.0 / train_size
@@ -103,7 +134,6 @@ k = 5.0
 f = 1.0
 r_k = 0.01
 g = 1.0
-
 
 def categorical_average(variable, y, pred_0, feature_name):
     def calculate_average(sub1, sub2):
@@ -142,8 +172,7 @@ def categorical_average(variable, y, pred_0, feature_name):
     # cv for training set
     k_fold = StratifiedKFold(5)
     X_train[feature_name] = -999
-    for (train_index, cv_index) in k_fold.split(np.zeros(len(X_train)),
-                                                X_train['interest_level'].ravel()):
+    for (train_index, cv_index) in k_fold.split(np.zeros(len(X_train)), X_train['interest_level'].ravel()):
         sub = pd.DataFrame(data={variable: X_train[variable],
                                  'y': X_train[y],
                                  'pred_0': X_train[pred_0]})
@@ -216,14 +245,13 @@ num_rounds = 2000
 xgtrain = xgb.DMatrix(X_train, label=y)
 clf = xgb.train(param, xgtrain, num_rounds)
 
-pred_train = clf.predict(xgtrain)
-train_sub = pd.DataFrame(data={'listing_id': X_test['listing_id'].ravel()})
-train_sub['low'] = pred_train[:, 0]
-train_sub['medium'] = pred_train[:, 1]
-train_sub['high'] = pred_train[:, 2]
+#pred_train = clf.predict(xgtrain)
+#train_sub = pd.DataFrame(data={'listing_id': X_train['listing_id'].ravel()})
+#train_sub['low'] = pred_train[:, 0]
+#train_sub['medium'] = pred_train[:, 1]
+#train_sub['high'] = pred_train[:, 2]
 
 print("Fitted")
-
 
 def prepare_submission(model):
     xgtest = xgb.DMatrix(X_test)
