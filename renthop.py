@@ -16,7 +16,7 @@ random.seed(321)
 np.random.seed(321)
 
 # read file
-X_train_test = pd.read_json("./train.json")
+X_train = pd.read_json("./train.json")
 X_test = pd.read_json("./test.json")
 
 # quantify target value
