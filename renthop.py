@@ -16,7 +16,6 @@ random.seed(321)
 np.random.seed(321)
 
 # read file
-X_train_test = pd.read_json("./train.json")
 X_train = pd.read_json("./train.json")
 X_test = pd.read_json("./test.json")
 
@@ -227,7 +226,6 @@ remove_columns(X_test)
 
 print("Start fitting...")
 
-
 param = {}
 param['objective'] = 'multi:softprob'
 param['eta'] = 0.02
@@ -262,4 +260,7 @@ def prepare_submission(model):
     sub['high'] = preds[:, 2]
     sub.to_csv("submission.csv", index=False, header=True)
 
-prepare_submission(clf)
+#prepare_submission(clf)
+
+#check_importance = pd.DataFrame(list(zip(list(dict_yh.keys()), list(dict_yh.values()))), columns=["key","value"])
+#check_importance.sort("value")
