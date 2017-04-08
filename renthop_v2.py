@@ -17,12 +17,12 @@ test_df = pd.read_json("./test.json")
 
 #define function for XGB model running
 
-def runXGB(train_X, train_y, test_X, test_y=None, feature_names=None, seed_val=0, num_rounds=1000):
+def runXGB(train_X, train_y, test_X, test_y=None, feature_names=None, seed_val=0, num_rounds=2000):
     param = {}
     param['objective'] = 'multi:softprob'
-    param['eta'] = 0.1
+    param['eta'] = 0.03
     param['max_depth'] = 6
-    param['silent'] = 0
+    param['silent'] = 1
     param['num_class'] = 3
     param['eval_metric'] = "mlogloss"
     param['min_child_weight'] = 1
@@ -66,8 +66,28 @@ test_df["num_features"] = test_df["features"].apply(len)
 train_df["num_description_words"] = train_df["description"].apply(lambda x: len(x.split(" ")))
 test_df["num_description_words"] = test_df["description"].apply(lambda x: len(x.split(" ")))
 
+# create time, interval time from since the list created
+train_df["created"] = pd.to_datetime(train_df["created"])
+train_df["passed"] = train_df["created"].max() - train_df["created"]
+train_df["passed"] = train_df["passed"].dt.days
+
+test_df["created"] = pd.to_datetime(test_df["created"])
+test_df["passed"] = test_df["created"].max() - test_df["created"]
+test_df["passed"] = test_df["passed"].dt.days
+
+train_df["created_year"] = train_df["created"].dt.year
+test_df["created_year"] = test_df["created"].dt.year
+train_df["created_month"] = train_df["created"].dt.month
+test_df["created_month"] = test_df["created"].dt.month
+train_df["created_day"] = train_df["created"].dt.day
+test_df["created_day"] = test_df["created"].dt.day
+train_df["created_hour"] = train_df["created"].dt.hour
+test_df["created_hour"] = test_df["created"].dt.hour
+
 features_to_use=["bathrooms", "bedrooms", "latitude", "longitude", "price","price_t",
-"num_photos", "num_features", "num_description_words","listing_id"]
+"num_photos", "num_features", "num_description_words","listing_id", "created_year", "created_month", "created_day", "created_hour"]
+
+
 
 
 #using cross valdation to compute the posterier prob (P(y = low/medium/high|x_manager))
@@ -237,7 +257,7 @@ for f in categorical:
 train_df['features'] = train_df["features"].apply(lambda x: " ".join(["_".join(i.split(" ")) for i in x]))
 test_df['features'] = test_df["features"].apply(lambda x: " ".join(["_".join(i.split(" ")) for i in x]))
 print(train_df["features"].head())
-tfidf = CountVectorizer(stop_words='english', max_features=200)
+tfidf = CountVectorizer(stop_words='english', max_features=80)
 tr_sparse = tfidf.fit_transform(train_df["features"])
 te_sparse = tfidf.transform(test_df["features"])
 
@@ -266,7 +286,7 @@ for dev_index, val_index in kf.split(range(train_X.shape[0])):
         
 
 #final predication
-preds, model = runXGB(train_X, train_y, test_X, num_rounds=400)
+preds, model = runXGB(train_X, train_y, test_X, num_rounds=1000)
 out_df = pd.DataFrame(preds)
 out_df.columns = ["high", "medium", "low"]
 out_df["listing_id"] = test_df.listing_id.values
