@@ -8,6 +8,7 @@ import random
 from sklearn import model_selection, preprocessing, ensemble
 from sklearn.metrics import log_loss
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from afinn import Afinn
 
 import os
 os.chdir("C:\\Users\\yuan\\Desktop\\renthop_2sigma")
@@ -17,10 +18,10 @@ test_df = pd.read_json("./test.json")
 
 #define function for XGB model running
 
-def runXGB(train_X, train_y, test_X, test_y=None, feature_names=None, seed_val=0, num_rounds=2000):
+def runXGB(train_X, train_y, test_X, test_y=None, feature_names=None, seed_val=321, num_rounds=4000):
     param = {}
     param['objective'] = 'multi:softprob'
-    param['eta'] = 0.03
+    param['eta'] = 0.2
     param['max_depth'] = 6
     param['silent'] = 1
     param['num_class'] = 3
@@ -37,7 +38,7 @@ def runXGB(train_X, train_y, test_X, test_y=None, feature_names=None, seed_val=0
     if test_y is not None:
         xgtest = xgb.DMatrix(test_X, label=test_y)
         watchlist = [ (xgtrain,'train'), (xgtest, 'test') ]
-        model = xgb.train(plst, xgtrain, num_rounds, watchlist, early_stopping_rounds=20)
+        model = xgb.train(plst, xgtrain, num_rounds, watchlist, early_stopping_rounds=100)
     else:
         xgtest = xgb.DMatrix(test_X)
         model = xgb.train(plst, xgtrain, num_rounds)
@@ -45,14 +46,28 @@ def runXGB(train_X, train_y, test_X, test_y=None, feature_names=None, seed_val=0
     pred_test_y = model.predict(xgtest)
     return pred_test_y, model
 
+
+train_df["price"] = train_df["price"].clip(upper=13000)
+
 #basic features
 #train_df.loc[train_df.loc[:,"bedrooms"] == 0, "bedrooms"] = 1
 train_df["price_t"] =train_df["price"]/train_df["bedrooms"]
 #test_df.loc[test_df.loc[:,"bedrooms"] == 0, "bedrooms"] = 1
 test_df["price_t"] = test_df["price"]/test_df["bedrooms"] 
 
+train_df["logprice"] = np.log(train_df["price"])
+test_df["logprice"] = np.log(test_df["price"])
+
 train_df["room_sum"] = train_df["bedrooms"]+train_df["bathrooms"] 
 test_df["room_sum"] = test_df["bedrooms"]+test_df["bathrooms"] 
+
+####
+train_df["room_dif"] = train_df["bedrooms"]-train_df["bathrooms"] 
+train_df["fold_t1"] = train_df["bedrooms"]/train_df["room_sum"]
+
+test_df["room_dif"] = test_df["bedrooms"]-test_df["bathrooms"] 
+test_df["fold_t1"] = test_df["bedrooms"]/test_df["room_sum"]
+####
 
 # count of photos #
 train_df["num_photos"] = train_df["photos"].apply(len)
@@ -84,10 +99,30 @@ test_df["created_day"] = test_df["created"].dt.day
 train_df["created_hour"] = train_df["created"].dt.hour
 test_df["created_hour"] = test_df["created"].dt.hour
 
-features_to_use=["bathrooms", "bedrooms", "latitude", "longitude", "price","price_t",
-"num_photos", "num_features", "num_description_words","listing_id", "created_year", "created_month", "created_day", "created_hour"]
+train_df["pos"] = train_df.longitude.round(3).astype(str) + '_' + train_df.latitude.round(3).astype(str)
+test_df["pos"] = test_df.longitude.round(3).astype(str) + '_' + test_df.latitude.round(3).astype(str)
+vals = train_df['pos'].value_counts()
+dvals = vals.to_dict()
+train_df["density"] = train_df['pos'].apply(lambda x: dvals.get(x, vals.min()))
+test_df["density"] = test_df['pos'].apply(lambda x: dvals.get(x, vals.min()))
 
+#adding features of sentiment analysis from CSV
+senti_df = pd.read_csv('train_sentiment.csv')
+senti_df = senti_df.drop("listing_id", axis=1)
+train_df = pd.concat([train_df, senti_df], axis=1, join_axes=[train_df.index])
 
+senti_df_test = pd.read_csv('test_sentiment.csv')
+test_df = pd.concat([test_df, senti_df_test], axis=1, join_axes=[test_df.index])
+
+#afinn = Afinn()
+#train_df["sentiment"] = train_df["description"].apply(afinn.score)
+#test_df["sentiment"] = test_df["description"].apply(afinn.score)
+
+features_to_use=["bathrooms", "bedrooms", "latitude", "longitude", "price", "price_t",
+                 "logprice", "density",
+                 "num_photos", "num_features", "num_description_words", "listing_id", 
+                 "created_year", "created_month", "created_day", "created_hour", "room_dif", #"fold_t1", "sentiment"]
+                 'anger', 'anticipation', 'disgust', 'fear', 'joy', 'sadness', 'surprise', 'trust', 'negative', 'positive']
 
 
 #using cross valdation to compute the posterier prob (P(y = low/medium/high|x_manager))
@@ -155,9 +190,9 @@ for i in test_df['manager_id'].values:
         b.append(np.nan)
         c.append(np.nan)
     else:
-        a.append(building_level[i][0]*1.0/sum(building_level[i]))
-        b.append(building_level[i][1]*1.0/sum(building_level[i]))
-        c.append(building_level[i][2]*1.0/sum(building_level[i]))
+        a.append(building_level[i][0]*np.float64(1.0)/sum(building_level[i]))
+        b.append(building_level[i][1]*np.float64(1.0)/sum(building_level[i]))
+        c.append(building_level[i][2]*np.float64(1.0)/sum(building_level[i]))
 test_df['manager_level_low']=a
 test_df['manager_level_medium']=b
 test_df['manager_level_high']=c
@@ -169,6 +204,7 @@ features_to_use.append('manager_level_high')
 
 #computing building_id posterior probability
 #############
+'''
 index=list(range(train_df.shape[0]))
 random.shuffle(index)
 a=[np.nan]*len(train_df)
@@ -238,6 +274,7 @@ test_df['building_level_high']=c
 features_to_use.append('building_level_low') 
 features_to_use.append('building_level_medium') 
 features_to_use.append('building_level_high')
+'''
 #############
 
 #transfer the categorical varibles to label integer
@@ -257,15 +294,17 @@ for f in categorical:
 train_df['features'] = train_df["features"].apply(lambda x: " ".join(["_".join(i.split(" ")) for i in x]))
 test_df['features'] = test_df["features"].apply(lambda x: " ".join(["_".join(i.split(" ")) for i in x]))
 print(train_df["features"].head())
-tfidf = CountVectorizer(stop_words='english', max_features=80)
+tfidf = CountVectorizer(stop_words='english', max_features=200)
 tr_sparse = tfidf.fit_transform(train_df["features"])
 te_sparse = tfidf.transform(test_df["features"])
 
 #deleting some features based on test
 features_to_use.remove("street_address")
+'''
 features_to_use.remove("building_level_low")
 features_to_use.remove("building_level_medium")
 features_to_use.remove("building_level_high")
+'''
 
 train_X = sparse.hstack([train_df[features_to_use], tr_sparse]).tocsr()
 test_X = sparse.hstack([test_df[features_to_use], te_sparse]).tocsr()
@@ -275,19 +314,47 @@ train_y = np.array(train_df['interest_level'].apply(lambda x: target_num_map[x])
 print(train_X.shape, test_X.shape)
 
 #this is what we called cv for using a traindata
+
 cv_scores = []
 kf = model_selection.KFold(n_splits=5, shuffle=True, random_state=2016)
 for dev_index, val_index in kf.split(range(train_X.shape[0])):
-        dev_X, val_X = train_X[dev_index,:], train_X[val_index,:]
-        dev_y, val_y = train_y[dev_index], train_y[val_index]
-        preds, model = runXGB(dev_X, dev_y, val_X, val_y)
-        cv_scores.append(log_loss(val_y, preds))
-        print(cv_scores)
-        
+        if count == 5:
+            dev_X, val_X = train_X[dev_index,:], train_X[val_index,:]
+            dev_y, val_y = train_y[dev_index], train_y[val_index]
+            preds, model = runXGB(dev_X, dev_y, val_X, val_y)
+            cv_scores.append(log_loss(val_y, preds))
+            print(cv_scores)
+    
+   
+#        [0.53395745886927504, 0.52972389568694334, 0.53440074603797627, 0.52204512768797062, 0.5213849260011747]
+#        [0.53452201632376184, 0.5298491750381028,  0.53530743891895372, 0.52195324634901619, 0.51992425740478398]
 
 #final predication
-preds, model = runXGB(train_X, train_y, test_X, num_rounds=1000)
+'''
+preds, model = runXGB(train_X, train_y, test_X, num_rounds=4000)
 out_df = pd.DataFrame(preds)
 out_df.columns = ["high", "medium", "low"]
 out_df["listing_id"] = test_df.listing_id.values
 out_df.to_csv("xgb_v2.csv", index=False)
+'''
+
+
+
+
+
+
+'''
+
+
+feature="manager_id"
+ranks = [50, 70, 75, 80, 85, 90, 95, 98, 99]
+
+series = train_df[feature]
+counts = series.value_counts().to_dict()
+values = np.fromiter(counts.values(), dtype='float')
+percentiles = np.percentile(values, ranks)
+
+for i in range(len(ranks)):
+    train_df['top_%d_%s' % (100 - ranks[i], feature)] = series.apply(lambda x: int(counts[x] >= percentiles[i]))
+'''
+    
